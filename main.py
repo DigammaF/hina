@@ -37,6 +37,9 @@ class LexicalUnit(Enum):
     k_true = 22
     k_false = 23
     k_var = 24
+    k_const = 25
+    k_not = 26
+    k_is = 27
 
 KEYWORDS = {
     "and": LexicalUnit.k_and,
@@ -54,11 +57,15 @@ KEYWORDS = {
     "true": LexicalUnit.k_true,
     "false": LexicalUnit.k_false,
     "var": LexicalUnit.k_var,
+    "const": LexicalUnit.k_const,
+    "not": LexicalUnit.k_not,
+    "is": LexicalUnit.k_is,
 }
 OPS: [str] = [
+    "//=",
     "++", "--", "+=", "-=", "*=", "/=", "//", "<=", ">=", "!=", "==",
-    "%", "+", "-", "*", "/", "&", "|", "=", "<", ">", ".", "{",
-    "}", "(", ")",
+    "%", "+", "-", "*", "/", "&", "=", "<", ">", ".", "{",
+    "}", "(", ")", "^",
 ]
 MAX_OP_LENGTH = max(len(w) for w in OPS)
 SPECIAL_OPS: {str: LexicalUnit} = {
@@ -251,13 +258,28 @@ def tokenize(txt: str, context: TokenizeContext) -> [Token]:
                         case _:
                             break
 
-                yield Token(unit=LexicalUnit.number, raw="".join(chars[reader:reader + offset]), context=TokenContext(
+                raw = "".join(chars[reader:reader + offset])
+                token_context = TokenContext(
                     raw_line=lines[line_num - 1],
                     line_num=line_num,
                     file_name=context.file_name,
                     start=line_reader,
                     length=offset,
-                ))
+                )
+
+                try:
+                    float(raw)
+
+                except ValueError:
+                    raise BadCodeInputException("\n".join(
+                        tuple(
+                            token_context.lines
+                        ) + (
+                            f"cannot use '{raw}' as a number",
+                        )
+                    ))
+
+                yield Token(unit=LexicalUnit.number, raw=raw, context=token_context)
 
                 reader += offset
                 line_reader += offset

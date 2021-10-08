@@ -5,29 +5,78 @@ statement := declaration|expression|flow_control
 
 identifier := [a-zA-Z_]*
 name := identifier ('.' identifier)*
-number := [0-9]*('.'[0-9]*)?
+number := 0-9_.
 string := '"' * '"'
 literal_value := number|string|'true'|'false'
-value := literal_value|(name args?)
+value := literal_value|name args?
 
-typed_name := name(type) name(name)
-params := '(' (typed_name ','?)* ')'
-args := '(' ('&'? ('[' name ']')? expression ','?)* ')'
-# '&' = pass by reference
+typed_identifier := name(type) identifier(name)
+params := '(' (typed_identifier ','?)* ')'
+args := '(' ('&'? expression ','?)* ')'
+# '&' = pass by reference (objects of custom types are always passed by reference)
 
-declaration := variable_declaration|function_declaration|class_declaration|constant_declaration
-variable_declaration := 'var' typed_name ((name args)|args)?
-constant_declaration := 'const' typed_name '=' literal_value
-variable_assignation := name '=' expression
-function_declaration := 'function' typed_name params code_block
-macro_declaration := '[' name ']' name:type params? expression
-class_declaration := 'class' name ('(' name ')')? '{' typed_name* function_declaration* '}'
-
-expression :=
+declaration := variable_declaration|function_declaration|class_declaration|constant_declaration|macro_declaration
+variable_declaration_ := typed_identifier args?
+variable_declaration := 'var' variable_declaration_
+constant_declaration := 'const' typed_name '=' expression
+variable_assignation := name ((('='|'+='|'-='|'*='|'/='|'//=') expression)|('++'|'--))
+function_declaration := 'function' typed_identifier params code_block
+macro_declaration := 'macro' typed_identifier params code_block
+class_declaration := 'class' identifier ('(' name ')')?
+    '{' variable_declaration_* macro_declaration* function_declaration* '}'
 
 flow_control := while_loop|for_loop|conditional_branch|use_branch|return_branch|code_block
 while_loop := 'while' expression code_block
 for_loop := 'for' name ',' expression ',' expression code_block
-conditional_branch := 'if' expression code_block ('elseif' expression code_block)* ('else' code_block)?
-use_branch := 'use' name ('as' name)?
+conditional_branch := 'if' expression code_block ('elif' expression code_block)* ('else' code_block)?
+use_branch := 'use' string ('as' identifier)?
 return_branch := 'return' expression
+# cannot return in macro except at last statement
+
+# or
+# and
+# is == != < > <= >=
+# + -
+# * / //
+# ^
+# not
+# -unary value (expression)
+
+# left recursive
+expression := or_clause ('or' or_clause)?
+or_clause := and_clause ('and' and_clause)?
+and_clause := compare_clause (('is'|'=='|'!='|'<'|'>'|'<='|'>=') compare_clause)?
+compare_clause := sum_clause (('+'|'-') sum_clause)?
+sum_clause := power_clause (('*'|'/'|'//') power_clause)?
+power_clause := factor_clause ('^' factor_clause)?
+factor_clause := 'not'? not_clause
+not_clause := '-'? (value|'(' expression ')')
+
+# same, but not left recursive
+expression := or_clause or_rest
+or_rest := 'or' or_clause or_rest | or_clause | ε
+or_clause := and_clause and_rest
+and_rest := 'and' and_clause and_rest | and_clause | ε
+and_clause := compare_clause compare_rest
+compare_rest := ('is'|'=='|'!='|'<'|'>'|'<='|'>=') compare_clause compare_rest | compare_clause | ε
+compare_clause := sum_clause sum_rest
+sum_rest := ('+'|'-') sum_clause sum_rest | sum_clause | ε
+sum_clause := power_clause power_rest
+power_rest := '^' power_clause power_rest | power_clause | ε
+power_clause := factor_clause
+
+factor_clause := 'not'? not_clause
+not_clause := '-'? (value|'(' expression ')')
+
+P(not_clause) = {'-', '(', value}
+P(factor_clause) = {'not'} U P(not_clause)
+P(power_clause) = P(factor_clause)
+P(power_rest) = {'^', ε} U P(power_clause)
+P(sum_clause) = P(power_clause)
+P(sum_rest) = {'+', '-', ε} U P(sum_clause)
+P(compare_clause) = P(sum_clause)
+P(compare_rest) = {'is'|'=='|'!='|'<'|'>'|'<='|'>=', ε} U P(power_clause)
+P(and_clause) = P(power_clause)
+P(and_rest) = {'and', ε} U P(and_clause)
+P(or_clause) = P(and_clause)
+P(or_rest) = {'or', ε} U P(or_clause)
