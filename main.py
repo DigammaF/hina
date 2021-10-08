@@ -1,12 +1,14 @@
 
-from enum import Enum
 import string
+import collections
+
+from enum import Enum
 
 class HinaException(Exception): pass
 class BadCodeInputException(HinaException): pass
 class InternalException(HinaException): pass
 
-class TokenSymbol(Enum):
+class LexicalUnit(Enum):
 
     number = 0
     string = 1
@@ -15,14 +17,52 @@ class TokenSymbol(Enum):
     open_p = 4
     close_p = 5
     op = 6
-    letters = 7
+    identifier = 7
     point = 8
     comment = 9
 
+    k_and = 10
+    k_or = 11
+    k_macro = 12
+    k_function = 13
+    k_class = 14
+    k_while = 15
+    k_for = 16
+    k_if = 17
+    k_else = 18
+    k_elif = 19
+    k_use = 20
+    k_as = 21
+    k_true = 22
+    k_false = 23
+
+KEYWORDS = {
+    "and": LexicalUnit.k_and,
+    "or": LexicalUnit.k_or,
+    "macro": LexicalUnit.k_macro,
+    "function": LexicalUnit.k_function,
+    "class": LexicalUnit.k_class,
+    "while": LexicalUnit.k_while,
+    "for": LexicalUnit.k_for,
+    "if": LexicalUnit.k_if,
+    "else": LexicalUnit.k_else,
+    "elif": LexicalUnit.k_elif,
+    "use": LexicalUnit.k_use,
+    "as": LexicalUnit.k_as,
+    "true": LexicalUnit.k_true,
+    "false": LexicalUnit.k_false,
+}
+
 OPS: [str] = [
-    "++", "--", "+=", "-=", "*=", "/=", "//", "<=", ">=", "!=",
-    "%", "+", "-", "*", "/", "&", "|",
+    "++", "--", "+=", "-=", "*=", "/=", "//", "<=", ">=", "!=", "==",
+    "%", "+", "-", "*", "/", "&", "|", "=", "<", ">", ".",
 ]
+
+MAX_OP_LENGTH = max(len(w) for w in OPS)
+
+SPECIAL_OPS: {str: LexicalUnit} = {
+    ".": LexicalUnit.point,
+}
 
 class TokenContext:
 
@@ -43,41 +83,85 @@ class TokenContext:
 
 class Token:
 
-    def __init__(self, symbol: TokenSymbol, raw: str, context: TokenContext):
+    def __init__(self, unit: LexicalUnit, raw: str, context: TokenContext):
 
-        self.symbol = symbol
+        self.unit = unit
         self.raw = raw
         self.context = context
 
     def __str__(self):
-        return f"({self.raw}){self.symbol}"
+        return f"({self.raw}){self.unit}"
 
-class TokenizeContext:
-
-    def __init__(self, file_name: str):
-
-        self.file_name = file_name
+TokenizeContext = collections.namedtuple("TokenizeContext", ["file_name"])
 
 def tokenize(txt: str, context: TokenizeContext) -> [Token]:
 
-    assert txt.endswith(" "), "Text must end with a space"
-    tokens = []
     lines = txt.split("\n")
-    chars = tuple(txt)
+    chars = tuple(txt) + (0,)
     line_num = 1
+    line_reader = 0
     reader = 0
 
     while True:
         match chars[reader:]:
-            case tuple():
+            case (0,):
                 break
 
             case (" " | "\t", *_):
+                line_reader += 1
                 reader += 1
 
             case ("\n", *_):
                 line_num += 1
+                line_reader = 0
                 reader += 1
+
+            case ("#", "#", *_):
+
+                comment_start = TokenContext(
+                    raw_line=lines[line_num],
+                    line_num=line_num,
+                    file_name=context.file_name,
+                    start=line_reader,
+                    length=2,
+                )
+                reader += 1
+
+                while True:
+
+                    reader += 1
+
+                    match chars[reader:]:
+                        case ("#", "#", *_):
+                            reader += 2
+                            break
+
+                        case ("\n", *_):
+                            line_num += 1
+                            line_reader = 0
+
+                        case (0,):
+                            raise BadCodeInputException("\n".join(
+                                tuple(
+                                    comment_start.lines
+                                ) + (
+                                    f"long comment is opened but never closed",
+                                )
+                            ))
+
+            case ("#", *_):
+
+                while True:
+
+                    reader += 1
+                    line_reader += 1
+
+                    match chars[reader:]:
+                        case ("\n", *_):
+                            line_num += 1
+                            line_reader = 0
+                            reader += 1
+                            break
 
             case (letter, *_) if letter in string.ascii_letters:
 
@@ -85,27 +169,29 @@ def tokenize(txt: str, context: TokenizeContext) -> [Token]:
 
                 while True:
                     match chars[reader + offset:]:
-                        case (char, *_) if char in string.digits + "._":
+                        case (char, *_) if char in string.ascii_letters + string.digits + "_":
                             offset += 1
 
                         case _:
                             break
 
-                tokens.append(
-                    Token(
-                        symbol=TokenSymbol.letters,
-                        raw=chars[reader:offset],
-                        context=TokenContext(
-                            raw_line=lines[line_num - 1],
-                            line_num=line_num,
-                            file_name=context.file_name,
-                            start=reader,
-                            length=offset,
-                        ),
-                    )
+                raw_letters = "".join(chars[reader:reader + offset])
+                token_context = TokenContext(
+                    raw_line=lines[line_num - 1],
+                    line_num=line_num,
+                    file_name=context.file_name,
+                    start=line_reader,
+                    length=offset,
                 )
 
-                reader += offset + 1
+                if raw_letters in KEYWORDS:
+                    yield Token(unit=KEYWORDS[raw_letters], raw=raw_letters, context=token_context)
+
+                else:
+                    yield Token(unit=LexicalUnit.identifier, raw=raw_letters, context=token_context)
+
+                reader += offset
+                line_reader += offset
 
             case (digit, *_) if digit in string.digits:
 
@@ -119,42 +205,39 @@ def tokenize(txt: str, context: TokenizeContext) -> [Token]:
                         case _:
                             break
 
-                tokens.append(
-                    Token(
-                        symbol=TokenSymbol.number,
-                        raw=chars[reader:offset],
-                        context=TokenContext(
-                            raw_line=lines[line_num - 1],
-                            line_num=line_num,
-                            file_name=context.file_name,
-                            start=reader,
-                            length=offset,
-                        ),
-                    )
-                )
+                yield Token(unit=LexicalUnit.number, raw="".join(chars[reader:reader + offset]), context=TokenContext(
+                    raw_line=lines[line_num - 1],
+                    line_num=line_num,
+                    file_name=context.file_name,
+                    start=line_reader,
+                    length=offset,
+                ))
 
-                reader += offset + 1
+                reader += offset
+                line_reader += offset
 
             case (char, *_):
 
-                for search_distance in range(max(len(w) for w in OPS), 0, -1):
-                    match chars[reader:]:
-                        case l if len(l) == search_distance and (op := "".join(l) in OPS):
-                            tokens.append(
-                                Token(
-                                    symbol=TokenSymbol.op,
-                                    raw=chars[reader:search_distance],
-                                    context=TokenContext(
-                                        raw_line=lines[line_num - 1],
-                                        line_num=line_num,
-                                        file_name=context.file_name,
-                                        start=reader,
-                                        length=search_distance,
-                                    ),
-                                )
+                for search_distance in range(MAX_OP_LENGTH, 0, -1):
+                    match chars[reader:reader + search_distance]:
+                        case l if len(l) == search_distance and (op := "".join(l)) in OPS:
+
+                            token_context = TokenContext(
+                                raw_line=lines[line_num - 1],
+                                line_num=line_num,
+                                file_name=context.file_name,
+                                start=line_reader,
+                                length=search_distance,
                             )
 
-                            reader += search_distance + 1
+                            if op in SPECIAL_OPS:
+                                yield Token(unit=SPECIAL_OPS[op], raw=op, context=token_context)
+
+                            else:
+                                yield Token(unit=LexicalUnit.op, raw=op, context=token_context)
+
+                            reader += search_distance
+                            line_reader += search_distance
                             break
 
                 else:
@@ -163,24 +246,22 @@ def tokenize(txt: str, context: TokenizeContext) -> [Token]:
                             raw_line=lines[line_num - 1],
                             line_num=line_num,
                             file_name=context.file_name,
-                            start=reader,
+                            start=line_reader,
                             length=1,
                         ).lines) + (
                             f"'{char}' doesn't belong to the lexical set of Hina",
                         )
                     ))
 
-    return tokens
-
 def main():
 
     file_name = "test.hina"
 
     with open(file_name, "r", encoding="utf-8") as f:
-        txt = f.read() + " "
+        txt = f.read()
 
     context = TokenizeContext(file_name=file_name)
-    tokens = tokenize(txt, context)
+    tokens = tuple(tokenize(txt, context))
     print(", ".join(str(t) for t in tokens))
 
 if __name__ == "__main__":
