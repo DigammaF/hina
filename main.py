@@ -20,6 +20,7 @@ class LexicalUnit(Enum):
     identifier = 7
     point = 8
     comment = 9
+    r_string = 101
 
     k_and = 10
     k_or = 11
@@ -35,6 +36,7 @@ class LexicalUnit(Enum):
     k_as = 21
     k_true = 22
     k_false = 23
+    k_var = 24
 
 KEYWORDS = {
     "and": LexicalUnit.k_and,
@@ -51,17 +53,20 @@ KEYWORDS = {
     "as": LexicalUnit.k_as,
     "true": LexicalUnit.k_true,
     "false": LexicalUnit.k_false,
+    "var": LexicalUnit.k_var,
 }
-
 OPS: [str] = [
     "++", "--", "+=", "-=", "*=", "/=", "//", "<=", ">=", "!=", "==",
-    "%", "+", "-", "*", "/", "&", "|", "=", "<", ">", ".",
+    "%", "+", "-", "*", "/", "&", "|", "=", "<", ">", ".", "{",
+    "}", "(", ")",
 ]
-
 MAX_OP_LENGTH = max(len(w) for w in OPS)
-
 SPECIAL_OPS: {str: LexicalUnit} = {
     ".": LexicalUnit.point,
+    "{": LexicalUnit.open_brace,
+    "}": LexicalUnit.close_brace,
+    "(": LexicalUnit.open_p,
+    ")": LexicalUnit.close_p,
 }
 
 class TokenContext:
@@ -146,6 +151,47 @@ def tokenize(txt: str, context: TokenizeContext) -> [Token]:
                                     comment_start.lines
                                 ) + (
                                     f"long comment is opened but never closed",
+                                )
+                            ))
+
+            case ('"', *_):
+
+                string_start = TokenContext(
+                    raw_line=lines[line_num - 1],
+                    line_num=line_num,
+                    file_name=context.file_name,
+                    start=line_reader,
+                    length=1,
+                )
+                offset = 0
+
+                while True:
+
+                    offset += 1
+
+                    match chars[reader + offset:]:
+                        case ('"', *_):
+
+                            raw = "".join(chars[reader + 1:reader + offset])
+                            yield Token(unit=LexicalUnit.r_string,
+                                        raw=raw,
+                                        context=TokenContext(
+                                            file_name=context.file_name,
+                                            length=len(raw) + 2,
+                                            line_num=line_num,
+                                            raw_line=lines[line_num - 1],
+                                            start=reader,
+                                        ),)
+                            reader += offset + 1
+                            line_reader += offset + 1
+                            break
+
+                        case (0 | "\n", *_):
+                            raise BadCodeInputException("\n".join(
+                                tuple(
+                                    string_start.lines
+                                ) + (
+                                    f"string is opened but not closed",
                                 )
                             ))
 

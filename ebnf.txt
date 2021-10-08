@@ -1,2 +1,33 @@
 
+program := statement*
+code_block := '{' statement* '}'
+statement := declaration|expression|flow_control
 
+identifier := [a-zA-Z_]*
+name := identifier ('.' identifier)*
+number := [0-9]*('.'[0-9]*)?
+string := '"' * '"'
+literal_value := number|string|'true'|'false'
+value := literal_value|(name args?)
+
+typed_name := name(type) name(name)
+params := '(' (typed_name ','?)* ')'
+args := '(' ('&'? ('[' name ']')? expression ','?)* ')'
+# '&' = pass by reference
+
+declaration := variable_declaration|function_declaration|class_declaration|constant_declaration
+variable_declaration := 'var' typed_name ((name args)|args)?
+constant_declaration := 'const' typed_name '=' literal_value
+variable_assignation := name '=' expression
+function_declaration := 'function' typed_name params code_block
+macro_declaration := '[' name ']' name:type params? expression
+class_declaration := 'class' name ('(' name ')')? '{' typed_name* function_declaration* '}'
+
+expression :=
+
+flow_control := while_loop|for_loop|conditional_branch|use_branch|return_branch|code_block
+while_loop := 'while' expression code_block
+for_loop := 'for' name ',' expression ',' expression code_block
+conditional_branch := 'if' expression code_block ('elseif' expression code_block)* ('else' code_block)?
+use_branch := 'use' name ('as' name)?
+return_branch := 'return' expression
